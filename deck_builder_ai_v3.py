@@ -1,10 +1,9 @@
-"""Deck Builder AI v2 - Com modelos atualizados"""
+"""Deck Builder AI v3 - Com modelos atualizados"""
 import streamlit as st
 from langchain_openai import ChatOpenAI
 from data.google_sheets_client import GoogleSheetsClient
 from core.deck_validator import DeckValidator
 from config.settings import settings
-from utils.deck_post_processor import DeckPostProcessor
 import json
 
 st.set_page_config(page_title="Deck Builder AI - Eternal", layout="wide")
@@ -13,6 +12,24 @@ st.markdown("---")
 
 # Configurações dos modelos
 MODEL_CONFIGS = {
+    "o1-pro": {
+        "name": "O1 Pro (Mais avançado)",
+        "supports_temperature": False,
+        "supports_stop": False,
+        "cost_per_1k": 0.015
+    },
+    "gpt-4.5-preview-2025-02-27": {
+        "name": "GPT-4.5 Preview (Experimental)",
+        "supports_temperature": True,
+        "supports_stop": True,
+        "cost_per_1k": 0.01
+    },
+    "gpt-4.1": {
+        "name": "GPT-4.1 (Versão estável)",
+        "supports_temperature": True,
+        "supports_stop": True,
+        "cost_per_1k": 0.008
+    },
     "gpt-4o": {
         "name": "GPT-4o (Mais recente e capaz)",
         "supports_temperature": True,
@@ -49,10 +66,10 @@ def create_llm(model_key):
     """Cria o LLM com as configurações corretas para cada modelo"""
     config = MODEL_CONFIGS[model_key]
     
-    # Para o4-mini, configuração especial
-    if model_key == "o4-mini":
+    # Para modelos o1/o4, configuração especial
+    if model_key in ["o1-pro", "o4-mini"]:
         return ChatOpenAI(
-            model="o4-mini",
+            model=model_key,
             api_key=settings.OPENAI_API_KEY,
             # NÃO incluir temperature nem stop
         )
@@ -73,7 +90,7 @@ def load_all_cards():
     client = GoogleSheetsClient()
     return client.get_all_cards()
 
-# Função para preparar contexto de cartas
+# Função para preparar contexto de cartas ATUALIZADA
 def prepare_cards_context(cards, strategy):
     """Prepara uma seleção relevante de cartas para o AI com dados completos"""
     
@@ -300,14 +317,14 @@ def prepare_cards_context(cards, strategy):
     
     return context
 
-# Função para gerar deck
+# Função para gerar deck ATUALIZADA
 def generate_deck(strategy, cards, model_key="gpt-4o", detailed=False):
     """Gera um deck usando o AI"""
     
     # Preparar contexto
     cards_context = prepare_cards_context(cards, strategy)
     
-    # Prompt unificado para todos os modelos
+    # Prompt CAMPEÃO para todos os modelos
     prompt = f"""Você é um CAMPEÃO MUNDIAL de TCGs, especialista supremo em Eternal Card Game, com anos de experiência competitiva em torneios de alto nível. Sua missão é construir decks CAMPEÕES que dominam o meta competitivo.
 
 === REGRAS FUNDAMENTAIS DE CONSTRUÇÃO ===
@@ -368,7 +385,7 @@ LEGENDAS DE INFLUÊNCIA:
 4. **Combos Principais:** [Liste interações específicas entre 2-3 cartas]
 5. **Matchups:** [Forte contra X, fraco contra Y, como adaptar sideboard]
 
-{"=== FORMATO DETALHADO ===" if detailed else ""}
+{"=== ANÁLISE DETALHADA DE TODAS AS CARTAS ===" if detailed else ""}
 {'''
 Para TODAS AS CARTAS NÃO-POWER do deck, forneça análise completa:
 
@@ -385,9 +402,10 @@ Para TODAS AS CARTAS NÃO-POWER do deck, forneça análise completa:
 ''' if detailed else ""}
 
 LEMBRE-SE: Você está construindo um deck para VENCER CAMPEONATOS. Cada escolha deve ser justificada com rigor competitivo. Use APENAS cartas da lista fornecida e mantenha foco absoluto em PODER e CONSISTÊNCIA.
+
 ⚠️ VALIDAÇÃO: Antes de responder, verifique se TODAS as cartas usadas existem na lista fornecida 
 com as EXATAS raridades e influências mostradas."""
-
+    
     # Gerar resposta
     llm = create_llm(model_key)
     response = llm.invoke(prompt)
@@ -412,7 +430,7 @@ with st.sidebar:
         "Modelo AI",
         range(len(model_options)),
         format_func=lambda x: model_names[x],
-        index=0  # Default para gpt-4o
+        index=3  # Default para gpt-4o
     )
     
     selected_model = model_options[selected_index]
@@ -471,8 +489,8 @@ if generate_button and strategy:
             
         except Exception as e:
             st.error(f"Erro ao gerar deck: {str(e)}")
-            if "o4" in selected_model and "stop" in str(e):
-                st.info("💡 O modelo O4 tem limitações específicas. Tente com GPT-4o ou GPT-4o-mini.")
+            if "o1" in selected_model.lower() or "o4" in selected_model.lower():
+                st.info("💡 Os modelos O1/O4 têm limitações específicas. Tente com GPT-4o ou GPT-4o-mini.")
 
 # Mostrar deck gerado
 if st.session_state.get('deck_generated', False):
@@ -511,85 +529,20 @@ if st.session_state.get('deck_generated', False):
         is_valid, errors, stats = validator.validate_text_deck(deck_for_validation)
         
         if is_valid:
-            st.success(f"✅ Deck válido! Total: {stats['total_cards']} cartas, {stats['power_cards']} powers ({stats['power_cards']/stats['total_cards']*100:.1f}%)")
+            st.success("✅ Deck válido!")
         else:
             st.error("❌ Deck com problemas:")
             for error in errors:
                 st.warning(error)
-    
-    # Debug: mostrar informações detalhadas do parsing
-    with st.expander("🔍 Debug - Análise Detalhada do Deck"):
-    # Mostrar resposta completa em abas
-        tab1, tab2, tab3 = st.tabs(["📝 Resposta da IA", "📊 Estatísticas", "🎴 Cartas Parseadas"])
-    
-    with tab1:
-        st.subheader("Resposta Bruta da IA")
-        # Mostrar com numeração de linhas
-        lines = deck_text.split('\n')
-        for i, line in enumerate(lines, 1):
-            if line.strip():
-                st.text(f"{i:3d}: {line}")
-    
-    with tab2:
-        st.subheader("Estatísticas do Parser")
-        if 'stats' in locals():
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Total de Cartas", stats['total_cards'])
-                st.metric("Linhas Parseadas", stats['parsed_lines'])
-                st.metric("Linhas de Metadata", stats['skipped_metadata'])
-            with col2:
-                st.metric("Cartas de Poder", stats['power_cards'])
-                st.metric("Cartas Únicas", len(stats['card_counts']))
-                if stats['failed_lines']:
-                    st.metric("Linhas com Erro", len(stats['failed_lines']))
-            
-            # Mostrar linhas que falharam
-            if stats['failed_lines']:
-                st.warning("Linhas que não foram parseadas:")
-                for line in stats['failed_lines']:
-                    st.text(line)
-    
-    with tab3:
-        st.subheader("Cartas Parseadas com Sucesso")
-        if 'stats' in locals() and stats['card_counts']:
-            # Ordenar por quantidade e nome
-            sorted_cards = sorted(stats['card_counts'].items(), key=lambda x: (-x[1], x[0]))
-            
-            # Mostrar em colunas
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("**Cartas Não-Poder:**")
-                non_power_total = 0
-                for card_name, qty in sorted_cards:
-                    if not any(word in card_name for word in ['Sigil', 'Power', 'Seat', 'Banner', 'Crest', 'Waystone']):
-                        st.text(f"{qty}x {card_name}")
-                        non_power_total += qty
-                st.caption(f"Total: {non_power_total} cartas")
-            
-            with col2:
-                st.write("**Cartas de Poder:**")
-                power_total = 0
-                for card_name, qty in sorted_cards:
-                    if any(word in card_name for word in ['Sigil', 'Power', 'Seat', 'Banner', 'Crest', 'Waystone']):
-                        st.text(f"{qty}x {card_name}")
-                        power_total += qty
-                st.caption(f"Total: {power_total} cartas")
         
-        # Análise das linhas do deck
-        st.subheader("Análise Linha por Linha")
-        if deck_lines:
-            st.write(f"**Linhas identificadas como deck:** {len(deck_lines)}")
-            for i, line in enumerate(deck_lines, 1):
-                result = validator.parse_deck_line(line)
-                if result:
-                    qty, name = result
-                    st.success(f"✅ Linha {i}: '{line}' → {qty}x {name}")
-                else:
-                    st.error(f"❌ Linha {i}: '{line}' → Não parseada")
-
-
+        # Mostrar estatísticas do parser
+        with st.expander("🔍 Debug - Estatísticas do Parser"):
+            st.write(f"Total de cartas: {stats['total_cards']}")
+            st.write(f"Cartas de poder: {stats['power_cards']}")
+            st.write(f"Formato detectado: {stats.get('format_detected', 'unknown')}")
+            st.write(f"Linhas parseadas: {stats['parsed_lines']}")
+            st.write(f"Linhas de metadata ignoradas: {stats['skipped_metadata']}")
+    
     # Mostrar resposta completa
     st.text_area("Resposta Completa:", deck_text, height=500)
     
@@ -604,33 +557,33 @@ if st.session_state.get('deck_generated', False):
         )
 
     with col2:
-    # NOVO: Botão de exportação
+        # Botão de exportação
         if st.button("📤 Exportar para o Jogo"):
             from utils.deck_exporter import DeckExporter
             exporter = DeckExporter()
         
-        with st.spinner("Convertendo para formato do jogo..."):
-            try:
-                exported_deck = exporter.export_deck_text(deck_text, deck_format)
-                
-                # Mostrar em uma text area para copiar
-                st.text_area(
-                    "Copie este texto para importar no Eternal:",
-                    exported_deck,
-                    height=300,
-                    key="exported_deck"
-                )
-                
-                # Botão para baixar também
-                st.download_button(
-                    label="💾 Baixar Deck Formatado",
-                    data=exported_deck,
-                    file_name=f"eternal_deck_{deck_format.lower()}.txt",
-                    mime="text/plain",
-                    key="download_formatted"
-                )
-            except Exception as e:
-                st.error(f"Erro ao exportar: {str(e)}")    
+            with st.spinner("Convertendo para formato do jogo..."):
+                try:
+                    exported_deck = exporter.export_deck_text(deck_text, deck_format)
+                    
+                    # Mostrar em uma text area para copiar
+                    st.text_area(
+                        "Copie este texto para importar no Eternal:",
+                        exported_deck,
+                        height=300,
+                        key="exported_deck"
+                    )
+                    
+                    # Botão para baixar também
+                    st.download_button(
+                        label="💾 Baixar Deck Formatado",
+                        data=exported_deck,
+                        file_name=f"eternal_deck_{deck_format.lower()}.txt",
+                        mime="text/plain",
+                        key="download_formatted"
+                    )
+                except Exception as e:
+                    st.error(f"Erro ao exportar: {str(e)}")    
     
     # Chat follow-up
     st.markdown("---")
@@ -662,4 +615,4 @@ else:
 
 # Footer
 st.markdown("---")
-st.caption("💡 Dica: GPT-4o oferece melhor qualidade, GPT-4o-mini é mais econômico, O4-mini é melhor para raciocínio complexo")
+st.caption("💡 Dica: Para melhores resultados, teste com o1-pro ou gpt-4o-preview para análises mais precisas")
