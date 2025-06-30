@@ -86,12 +86,16 @@ class DeckExporter:
         return any(indicator in line.upper() for indicator in metadata_indicators)
     
     def parse_deck_line(self, line: str) -> Optional[Tuple[int, str]]:
-        """Parser simples para linha de deck"""
+        """Parser para linha de deck - agora suporta formato com pipes"""
         line = line.strip()
         if not line:
             return None
         
-        # Remover informações de set se já existirem
+        # Se tem pipe, é o novo formato - pegar apenas a primeira parte
+        if '|' in line:
+            line = line.split('|')[0].strip()
+        
+        # Remover informações de set se já existirem (para formato antigo)
         line = re.sub(r'\([^)]*\)', '', line).strip()
         
         # Tentar diferentes padrões

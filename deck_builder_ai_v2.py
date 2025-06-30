@@ -280,59 +280,84 @@ def generate_deck(strategy, cards, model_key="gpt-4o", detailed=False):
     # Preparar contexto
     cards_context = prepare_cards_context(cards, strategy)
     
-    # Ajustar prompt baseado no modelo
-    if model_key == "o4-mini":
-        # Modelo o4-mini prefere instruções mais diretas
-        prompt = f"""Construa um deck competitivo de Eternal Card Game.
+    # Prompt unificado para todos os modelos
+    prompt = f"""Você é um CAMPEÃO MUNDIAL de TCGs, especialista supremo em Eternal Card Game, com anos de experiência competitiva em torneios de alto nível. Sua missão é construir decks CAMPEÕES que dominam o meta competitivo.
 
-REQUISITOS:
-- Exatamente 75 cartas total
-- Mínimo 25 powers (1/3 do deck)
-- Máximo 4 cópias por carta (exceto Sigils)
-- Use apenas cartas da lista fornecida
+=== REGRAS FUNDAMENTAIS DE CONSTRUÇÃO ===
 
-{cards_context}
+REQUISITOS OBRIGATÓRIOS (NUNCA VIOLE ESTAS REGRAS):
+1. Tamanho do Deck: EXATAMENTE 75-150 cartas (padrão competitivo: 75)
+2. Proporção de Power: MÍNIMO 1/3 do deck (25+ em deck de 75)
+3. Proporção de Não-Power: MÍNIMO 2/3 do deck (50+ em deck de 75)
+4. Limite de Cópias: MÁXIMO 4 por carta (EXCETO Sigils básicos = ilimitados)
+5. Validação: TODAS as cartas devem ter DeckBuildable=TRUE
+6. Mercado: OPCIONAL - até 5 cartas únicas (requer cartas no deck principal que acessem, troquem, comprem ou copiem cartas do mercado)
 
-ESTRATÉGIA: {strategy}
-
-Responda com:
-1. Lista do deck (formato: "4 Nome da Carta")
-2. Estratégia principal (2-3 linhas)
-3. Guia de jogo (4-5 pontos)
-"""
-    else:
-        # Modelos GPT tradicionais
-        prompt = f"""Você é um expert em Eternal Card Game, especialista em construir decks competitivos.
-
-REGRAS OBRIGATÓRIAS:
-1. O deck deve ter EXATAMENTE 75 cartas
-2. MÍNIMO 25 cartas devem ser Power cards (Sigils, Banners, etc)
-3. Máximo 4 cópias de cada carta (exceto Sigils básicos que podem ter mais)
-4. Use APENAS cartas da lista fornecida abaixo
-5. O formato de saída deve ser: "4 Nome Exato da Carta"
+VALIDAÇÃO MATEMÁTICA OBRIGATÓRIA:
+- Some TODAS as quantidades: (X units + Y spells + Z weapons + W relics + P powers = 75)
+- Verifique: Total ≥ 75, Powers ≥ 25, Não-Powers ≥ 50
+- Conte cada linha individualmente antes de finalizar
 
 {cards_context}
 
 ESTRATÉGIA SOLICITADA: {strategy}
 
-{"MODO DETALHADO: Explique cada escolha importante." if detailed else ""}
+=== FORMATO PADRÃO DE RESPOSTA ===
 
-Por favor, construa um deck otimizado seguindo estas instruções:
+**[NOME DO DECK] - [Facções] [Arquétipo]**
+*"[Tagline criativa descrevendo a estratégia em uma frase]"*
 
-FORMATO DE RESPOSTA OBRIGATÓRIO:
-=== DECK (75 cartas) ===
-4 Nome da Carta
-3 Outra Carta
-(liste todas as 75 cartas)
+=== UNITS (total) ===
+4x Nome da Carta | Custo{{F}}{{F}} | Attack/Health | Rarity
+3x Outra Carta | Custo{{T}}{{S}} | Attack/Health | Rarity
 
-=== ESTRATÉGIA ===
-(2-3 linhas explicando o plano central)
+=== SPELLS (total) ===
+4x Nome do Spell | Custo{{J}} | N/A | Rarity
 
-=== COMO JOGAR ===
-(4-5 pontos sobre pilotagem)
+=== WEAPONS (total) === (se houver)
+2x Nome da Arma | Custo{{P}} | +Attack/+Health | Rarity
 
-{"=== EXPLICAÇÕES DETALHADAS ===\n(justifique as escolhas principais)" if detailed else ""}
-"""
+=== RELICS (total) === (se houver)
+3x Nome da Relíquia | Custo{{T}}{{J}} | N/A | Rarity
+
+=== POWERS (total) === (OBRIGATÓRIO - mínimo 25)
+25x Fire Sigil | 0 | N/A | Basic
+4x Seat of Glory | 0 | N/A | Uncommon
+4x Diplomatic Seal | 0 | N/A | Common
+
+=== MARKET (5) === (se incluir cartas que interagem com mercado)
+1x Carta Situacional | Custo | Stats | Rarity
+
+LEGENDAS DE INFLUÊNCIA:
+{{F}} = Fire, {{T}} = Time, {{J}} = Justice, {{P}} = Primal, {{S}} = Shadow
+
+=== ESTRATÉGIA GERAL ===
+[Parágrafo explicando a filosofia central do deck, win conditions principais e por que este deck é competitivo no meta atual]
+
+=== GUIA DE JOGO ===
+1. **Early Game (Turnos 1-3):** [Detalhe as jogadas ideais, mulligans e objetivos]
+2. **Mid Game (Turnos 4-6):** [Transições, desenvolvimento de board e timing de remoções]
+3. **Late Game (Turnos 7+):** [Win conditions, como fechar o jogo e recursos finais]
+4. **Combos Principais:** [Liste interações específicas entre 2-3 cartas]
+5. **Matchups:** [Forte contra X, fraco contra Y, como adaptar sideboard]
+
+{"=== FORMATO DETALHADO ===" if detailed else ""}
+{'''
+Para TODAS AS CARTAS NÃO-POWER do deck, forneça análise completa:
+
+**[Nome da Carta] (X cópias)**
+* *Custo:* X | *Influência:* {{F}}{{F}}
+* *Attack/Health:* X/X (ou N/A para não-unidades)
+* *Texto:* "[Texto completo da habilidade]"
+* *Expansão:* [Nome do Set]
+* *Motivo no deck:* [Explicação detalhada de por que esta carta específica foi escolhida]
+* *Sinergias/Combos:*
+  * **[Carta 1]:** [Como interage e por quê é poderoso]
+  * **[Carta 2]:** [Situações específicas onde brilha]
+* *Possíveis substituições:* [Alternativas budget ou tech choices]
+''' if detailed else ""}
+
+LEMBRE-SE: Você está construindo um deck para VENCER CAMPEONATOS. Cada escolha deve ser justificada com rigor competitivo. Use APENAS cartas da lista fornecida e mantenha foco absoluto em PODER e CONSISTÊNCIA."""
     
     # Gerar resposta
     llm = create_llm(model_key)
@@ -454,15 +479,88 @@ if st.session_state.get('deck_generated', False):
     # Validar deck
     if deck_lines:
         deck_for_validation = '\n'.join(deck_lines)
-        is_valid, errors = validator.validate_text_deck(deck_for_validation)
+        is_valid, errors, stats = validator.validate_text_deck(deck_for_validation)
         
         if is_valid:
-            st.success("✅ Deck válido!")
+            st.success(f"✅ Deck válido! Total: {stats['total_cards']} cartas, {stats['power_cards']} powers ({stats['power_cards']/stats['total_cards']*100:.1f}%)")
         else:
             st.error("❌ Deck com problemas:")
             for error in errors:
                 st.warning(error)
     
+    # Debug: mostrar informações detalhadas do parsing
+    with st.expander("🔍 Debug - Análise Detalhada do Deck"):
+    # Mostrar resposta completa em abas
+        tab1, tab2, tab3 = st.tabs(["📝 Resposta da IA", "📊 Estatísticas", "🎴 Cartas Parseadas"])
+    
+    with tab1:
+        st.subheader("Resposta Bruta da IA")
+        # Mostrar com numeração de linhas
+        lines = deck_text.split('\n')
+        for i, line in enumerate(lines, 1):
+            if line.strip():
+                st.text(f"{i:3d}: {line}")
+    
+    with tab2:
+        st.subheader("Estatísticas do Parser")
+        if 'stats' in locals():
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Total de Cartas", stats['total_cards'])
+                st.metric("Linhas Parseadas", stats['parsed_lines'])
+                st.metric("Linhas de Metadata", stats['skipped_metadata'])
+            with col2:
+                st.metric("Cartas de Poder", stats['power_cards'])
+                st.metric("Cartas Únicas", len(stats['card_counts']))
+                if stats['failed_lines']:
+                    st.metric("Linhas com Erro", len(stats['failed_lines']))
+            
+            # Mostrar linhas que falharam
+            if stats['failed_lines']:
+                st.warning("Linhas que não foram parseadas:")
+                for line in stats['failed_lines']:
+                    st.text(line)
+    
+    with tab3:
+        st.subheader("Cartas Parseadas com Sucesso")
+        if 'stats' in locals() and stats['card_counts']:
+            # Ordenar por quantidade e nome
+            sorted_cards = sorted(stats['card_counts'].items(), key=lambda x: (-x[1], x[0]))
+            
+            # Mostrar em colunas
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Cartas Não-Poder:**")
+                non_power_total = 0
+                for card_name, qty in sorted_cards:
+                    if not any(word in card_name for word in ['Sigil', 'Power', 'Seat', 'Banner', 'Crest', 'Waystone']):
+                        st.text(f"{qty}x {card_name}")
+                        non_power_total += qty
+                st.caption(f"Total: {non_power_total} cartas")
+            
+            with col2:
+                st.write("**Cartas de Poder:**")
+                power_total = 0
+                for card_name, qty in sorted_cards:
+                    if any(word in card_name for word in ['Sigil', 'Power', 'Seat', 'Banner', 'Crest', 'Waystone']):
+                        st.text(f"{qty}x {card_name}")
+                        power_total += qty
+                st.caption(f"Total: {power_total} cartas")
+        
+        # Análise das linhas do deck
+        st.subheader("Análise Linha por Linha")
+        if deck_lines:
+            st.write(f"**Linhas identificadas como deck:** {len(deck_lines)}")
+            for i, line in enumerate(deck_lines, 1):
+                result = validator.parse_deck_line(line)
+                if result:
+                    qty, name = result
+                    st.success(f"✅ Linha {i}: '{line}' → {qty}x {name}")
+                else:
+                    st.error(f"❌ Linha {i}: '{line}' → Não parseada")
+
+
     # Mostrar resposta completa
     st.text_area("Resposta Completa:", deck_text, height=500)
     
