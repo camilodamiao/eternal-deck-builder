@@ -12,8 +12,8 @@ st.markdown("---")
 
 # Configurações dos modelos
 MODEL_CONFIGS = {
-    "o1-pro": {
-        "name": "O1 Pro (Mais avançado)",
+    "o1": {
+        "name": "O1 (Mais avançado)",
         "supports_temperature": False,
         "supports_stop": False,
         "cost_per_1k": 0.015
@@ -67,7 +67,7 @@ def create_llm(model_key):
     config = MODEL_CONFIGS[model_key]
     
     # Para modelos o1/o4, configuração especial
-    if model_key in ["o1-pro", "o4-mini"]:
+    if model_key in ["o1", "o4-mini"]:
         return ChatOpenAI(
             model=model_key,
             api_key=settings.OPENAI_API_KEY,
@@ -91,45 +91,82 @@ def load_all_cards():
     return client.get_all_cards()
 
 # Função para preparar contexto de cartas ATUALIZADA
-def prepare_cards_context(cards, strategy):
+def prepare_cards_context(cards, strategy, filters=None):
     """Prepara uma seleção relevante de cartas para o AI com dados completos"""
     
-    # Identificar facções mencionadas
-    factions_mentioned = []
-    faction_keywords = {
-        "FIRE": ["fire", "burn", "aggro", "red", "torch", "oni"],
-        "TIME": ["time", "ramp", "big", "yellow", "sandstorm", "sentinel"],
-        "JUSTICE": ["justice", "armor", "weapons", "green", "valkyrie", "enforcer"],
-        "PRIMAL": ["primal", "spell", "blue", "control", "lightning", "wisdom"],
-        "SHADOW": ["shadow", "kill", "void", "purple", "black", "umbren", "stonescar"]
-    }
+    # Configurações padrão se não forem passados filtros
+    if filters is None:
+        filters = {
+            'allowed_factions': ['FIRE', 'TIME', 'JUSTICE', 'PRIMAL', 'SHADOW'],
+            'max_factions': 5,
+            'use_market': True,
+            'required_cards': [],
+            'banned_cards': [],
+            'filter_mode': 'relevant'
+        }
     
-    strategy_lower = strategy.lower()
+    # Debug dos filtros
+    if filters['required_cards']:
+        st.info(f"🔍 Cartas obrigatórias solicitadas: {filters['required_cards']}")
     
-    # Detectar facções com base em keywords
-    for faction, keywords in faction_keywords.items():
-        if any(keyword in strategy_lower for keyword in keywords):
-            factions_mentioned.append(faction)
+    # Debug do total de cartas
+    st.info(f"📊 Total de cartas na base: {len(cards)}")
     
-    # Se nenhuma facção identificada, incluir todas
-    if not factions_mentioned:
-        factions_mentioned = list(faction_keywords.keys())
+    # PRIMEIRO: Processar cartas obrigatórias/banidas (SEMPRE)
+    cards_to_process = []
+    required_cards_found = []
     
-    # Detectar arquétipo baseado em keywords
-    archetype_keywords = {
-        'aggro': ['aggro', 'fast', 'rush', 'burn', 'quick', 'aggressive'],
-        'control': ['control', 'slow', 'removal', 'board clear', 'late game'],
-        'midrange': ['midrange', 'balanced', 'curve', 'tempo'],
-        'combo': ['combo', 'synergy', 'engine', 'infinite']
-    }
+    # Remover cartas banidas
+    for card in cards:
+        if card.name not in filters['banned_cards']:
+            cards_to_process.append(card)
     
-    detected_archetype = 'midrange'  # default
-    for arch, keywords in archetype_keywords.items():
-        if any(keyword in strategy_lower for keyword in keywords):
-            detected_archetype = arch
-            break
+    # Buscar cartas obrigatórias
+    for required_name in filters['required_cards']:
+        found = False
+        # Busca exata primeiro
+        for card in cards:
+            if card.name.lower() == required_name.lower():
+                required_cards_found.append(card)
+                st.success(f"✅ Carta obrigatória '{card.name}' encontrada!")
+                found = True
+                break
+        
+        if not found:
+            # Busca parcial
+            partial_matches = []
+            for card in cards:
+                if required_name.lower() in card.name.lower():
+                    partial_matches.append(card)
+            
+            if partial_matches:
+                st.warning(f"⚠️ '{required_name}' não encontrado exatamente. Encontradas {len(partial_matches)} correspondências parciais:")
+                for match in partial_matches[:5]:
+                    st.write(f"  - {match.name}")
+                # Adicionar a primeira correspondência
+                required_cards_found.append(partial_matches[0])
+                st.info(f"➕ Adicionando '{partial_matches[0].name}' como melhor correspondência")
+            else:
+                st.error(f"❌ Carta '{required_name}' não encontrada de forma alguma na base!")
     
-    # Filtrar cartas relevantes com priorização
+    # Função auxiliar para formatar influência
+    def format_influence(card):
+        """Formata influência no estilo {F}{T}{J}"""
+        if not card.influence:
+            return str(card.cost)
+        
+        influence_str = str(card.cost)
+        influence_map = {'FIRE': 'F', 'TIME': 'T', 'JUSTICE': 'J', 'PRIMAL': 'P', 'SHADOW': 'S'}
+        
+        for faction in ['FIRE', 'TIME', 'JUSTICE', 'PRIMAL', 'SHADOW']:
+            if faction in card.influence:
+                count = card.influence[faction]
+                symbol = influence_map[faction]
+                influence_str += '{' + symbol + '}' * count
+                
+        return influence_str
+    
+    # Inicializar categorias
     relevant_cards = {
         "units_low": [],
         "units_mid": [],
@@ -141,103 +178,280 @@ def prepare_cards_context(cards, strategy):
         "sites": []
     }
     
-    # Função auxiliar para formatar influência
-    def format_influence(card):
-        """Formata influência no estilo {F}{T}{J}"""
-        if not card.influence:
-            return str(card.cost)
+    # MODO COMPLETO - Incluir todas as cartas
+    if filters['filter_mode'] == 'Incluir todas as cartas':
+        st.info(f"📊 Modo completo: incluindo {len(cards_to_process)} cartas (após remover banidas)")
         
-        influence_str = str(card.cost)
-        influence_map = {'FIRE': 'F', 'TIME': 'T', 'JUSTICE': 'J', 'PRIMAL': 'P', 'SHADOW': 'S'}
+        # Adicionar cartas obrigatórias primeiro
+        for card in required_cards_found:
+            if card.card_type == "Unit":
+                if card.cost <= 2:
+                    relevant_cards["units_low"].append(card)
+                elif card.cost <= 4:
+                    relevant_cards["units_mid"].append(card)
+                else:
+                    relevant_cards["units_high"].append(card)
+            elif card.card_type == "Spell":
+                relevant_cards["spells"].append(card)
+            elif card.card_type == "Weapon":
+                relevant_cards["weapons"].append(card)
+            elif card.card_type == "Power":
+                relevant_cards["powers"].append(card)
+            elif card.card_type == "Relic":
+                relevant_cards["relics"].append(card)
+            elif card.card_type == "Site":
+                relevant_cards["sites"].append(card)
         
-        for faction, count in sorted(card.influence.items()):
-            symbol = influence_map.get(faction, '?')
-            influence_str += '{' + symbol + '}' * count
-            
-        return influence_str
-    
-    # Scoring para relevância
-    def calculate_relevance(card):
-        score = 0
+        # Adicionar todas as outras cartas
+        for card in cards_to_process:
+            # Pular se já foi adicionada como obrigatória
+            if card in required_cards_found:
+                continue
+                
+            if card.card_type == "Unit":
+                if card.cost <= 2:
+                    relevant_cards["units_low"].append(card)
+                elif card.cost <= 4:
+                    relevant_cards["units_mid"].append(card)
+                else:
+                    relevant_cards["units_high"].append(card)
+            elif card.card_type == "Spell":
+                relevant_cards["spells"].append(card)
+            elif card.card_type == "Weapon":
+                relevant_cards["weapons"].append(card)
+            elif card.card_type == "Power":
+                relevant_cards["powers"].append(card)
+            elif card.card_type == "Relic":
+                relevant_cards["relics"].append(card)
+            elif card.card_type == "Site":
+                relevant_cards["sites"].append(card)
         
-        # Facção correta = +10 pontos
-        if any(f in card.factions for f in factions_mentioned):
-            score += 10
+        # Usar facções permitidas pelos filtros
+        factions_for_context = filters['allowed_factions']
+        archetype_for_context = 'ALL CARDS'
         
-        # Custo apropriado para arquétipo
-        if detected_archetype == 'aggro' and card.cost <= 3:
-            score += 5
-        elif detected_archetype == 'control' and card.cost >= 4:
-            score += 5
-        elif detected_archetype == 'midrange' and 2 <= card.cost <= 5:
-            score += 5
+    else:
+        # MODO FILTRADO - Aplicar todos os filtros
         
-        # Keywords relevantes no texto
-        relevant_keywords = {
-            'aggro': ['charge', 'warcry', 'quickdraw', 'overwhelm'],
-            'control': ['endurance', 'aegis', 'silence', 'kill', 'destroy'],
-            'midrange': ['summon', 'bond', 'ally', 'empower'],
-            'combo': ['echo', 'destiny', 'revenge', 'amplify']
+        # Identificar facções mencionadas
+        factions_mentioned = []
+        faction_keywords = {
+            "FIRE": ["fire", "burn", "aggro", "red", "torch", "oni"],
+            "TIME": ["time", "ramp", "big", "yellow", "sandstorm", "sentinel"],
+            "JUSTICE": ["justice", "armor", "weapons", "green", "valkyrie", "enforcer"],
+            "PRIMAL": ["primal", "spell", "blue", "control", "lightning", "wisdom"],
+            "SHADOW": ["shadow", "kill", "void", "purple", "black", "umbren", "stonescar"]
         }
         
-        if card.text:
-            for keyword in relevant_keywords.get(detected_archetype, []):
-                if keyword.lower() in card.text.lower():
-                    score += 3
+        strategy_lower = strategy.lower()
         
-        return score
-    
-    # Classificar e pontuar cartas
-    scored_cards = [(card, calculate_relevance(card)) for card in cards]
-    scored_cards.sort(key=lambda x: x[1], reverse=True)
-    
-    # Distribuir cartas nas categorias
-    for card, score in scored_cards:
-        # Pular cartas com score muito baixo (não relevantes)
-        if score < 5 and len(scored_cards) > 100:
-            continue
+        # Detectar facções com base em keywords
+        for faction, keywords in faction_keywords.items():
+            if any(keyword in strategy_lower for keyword in keywords):
+                factions_mentioned.append(faction)
         
-        if card.card_type == "Unit":
-            if card.cost <= 2:
-                if len(relevant_cards["units_low"]) < 25:
-                    relevant_cards["units_low"].append(card)
-            elif card.cost <= 4:
-                if len(relevant_cards["units_mid"]) < 20:
-                    relevant_cards["units_mid"].append(card)
+        # Se nenhuma facção identificada, usar as permitidas
+        if not factions_mentioned:
+            factions_mentioned = filters['allowed_factions']
+        
+        # Detectar arquétipo baseado em keywords
+        archetype_keywords = {
+            'aggro': ['aggro', 'fast', 'rush', 'burn', 'quick', 'aggressive'],
+            'control': ['control', 'slow', 'removal', 'board clear', 'late game'],
+            'midrange': ['midrange', 'balanced', 'curve', 'tempo'],
+            'combo': ['combo', 'synergy', 'engine', 'infinite']
+        }
+        
+        detected_archetype = 'midrange'  # default
+        for arch, keywords in archetype_keywords.items():
+            if any(keyword in strategy_lower for keyword in keywords):
+                detected_archetype = arch
+                break
+        
+        # Scoring para relevância
+        def calculate_relevance(card):
+            score = 0
+            
+            # Facção correta = +10 pontos
+            if any(f in card.factions for f in factions_mentioned):
+                score += 10
+            
+            # Custo apropriado para arquétipo
+            if detected_archetype == 'aggro' and card.cost <= 3:
+                score += 5
+            elif detected_archetype == 'control' and card.cost >= 4:
+                score += 5
+            elif detected_archetype == 'midrange' and 2 <= card.cost <= 5:
+                score += 5
+            
+            # Keywords relevantes no texto
+            relevant_keywords = {
+                'aggro': ['charge', 'warcry', 'quickdraw', 'overwhelm'],
+                'control': ['endurance', 'aegis', 'silence', 'kill', 'destroy'],
+                'midrange': ['summon', 'bond', 'ally', 'empower'],
+                'combo': ['echo', 'destiny', 'revenge', 'amplify']
+            }
+            
+            if card.text:
+                for keyword in relevant_keywords.get(detected_archetype, []):
+                    if keyword.lower() in card.text.lower():
+                        score += 3
+            
+            return score
+        
+        # Classificar e pontuar cartas
+        scored_cards = [(card, calculate_relevance(card)) for card in cards_to_process]
+        scored_cards.sort(key=lambda x: x[1], reverse=True)
+        
+        # Aplicar filtros antes de distribuir nas categorias
+        filtered_cards = []
+        
+        for card, score in scored_cards:
+            # 1. SEMPRE incluir cartas obrigatórias (verificar PRIMEIRO)
+            if any(req.lower() == card.name.lower() for req in filters['required_cards']):
+                filtered_cards.append((card, 100))  # Score máximo
+                continue
+            
+            # 2. Verificar se a carta está banida (já foi removida em cards_to_process)
+            
+            # 3. Verificar facções permitidas
+            if card.factions:  # Se a carta tem facções
+                if not any(f in filters['allowed_factions'] for f in card.factions):
+                    continue
+            
+            # 4. Verificar número máximo de facções
+            if len(card.factions) > filters['max_factions']:
+                continue
+            
+            # 5. Verificar filtro de mercado (CORRIGIDO)
+            if not filters['use_market']:
+                card_text_lower = card.text.lower()
+                # Lista expandida de termos de mercado
+                market_terms = [
+                    'your market',
+                    'bargain',
+                    'from your market',
+                    'into your market',
+                    'market card',
+                    'smuggler'  # Smugglers também acessam mercado
+                ]
+                
+                # Excluir apenas se tem termo de mercado E não afeta mercado inimigo
+                has_market_interaction = any(term in card_text_lower for term in market_terms)
+                affects_enemy_market = any(term in card_text_lower for term in [
+                    'their market',
+                    'enemy market',
+                    "opponent's market",
+                    'each market'  # Afeta ambos
+                ])
+                
+                if has_market_interaction and not affects_enemy_market:
+                    continue
+            
+            # 6. IMPORTANTE: Se usar mercado, garantir que temos merchants/smugglers
+            if filters['use_market']:
+                # Dar boost para cartas que acessam mercado
+                if any(term in card.text.lower() for term in ['your market', 'smuggler', 'merchant', 'bargain']):
+                    score += 20  # Boost significativo
+            
+            # 7. Score mínimo mais permissivo
+            min_score = 3  # Era 5
+            
+            # Sempre incluir powers (são essenciais)
+            if card.card_type == "Power":
+                filtered_cards.append((card, score))
+            # Para outras cartas, aplicar score mínimo
+            elif score >= min_score or len(scored_cards) <= 200:  # Era 100
+                filtered_cards.append((card, score))
+        
+        # Debug
+        st.info(f"🎯 Cartas após filtros: {len(filtered_cards)}")
+        
+        # Garantir que cartas obrigatórias estejam incluídas
+        for req_card in required_cards_found:
+            if not any(c[0].name == req_card.name for c in filtered_cards):
+                filtered_cards.insert(0, (req_card, 100))
+                st.warning(f"⚠️ Adicionando '{req_card.name}' que foi perdida nos filtros")
+        
+        # Distribuir cartas nas categorias
+        for card, score in filtered_cards:
+            if card.card_type == "Unit":
+                if card.cost <= 2:
+                    if len(relevant_cards["units_low"]) < 25:
+                        relevant_cards["units_low"].append(card)
+                elif card.cost <= 4:
+                    if len(relevant_cards["units_mid"]) < 20:
+                        relevant_cards["units_mid"].append(card)
+                else:
+                    if len(relevant_cards["units_high"]) < 15:
+                        relevant_cards["units_high"].append(card)
+            elif card.card_type == "Spell":
+                if len(relevant_cards["spells"]) < 20:
+                    relevant_cards["spells"].append(card)
+            elif card.card_type == "Weapon":
+                if len(relevant_cards["weapons"]) < 15:
+                    relevant_cards["weapons"].append(card)
+            elif card.card_type == "Power":
+                if len(relevant_cards["powers"]) < 30:
+                    relevant_cards["powers"].append(card)
+            elif card.card_type == "Relic":
+                if len(relevant_cards["relics"]) < 10:
+                    relevant_cards["relics"].append(card)
+            elif card.card_type == "Site":
+                if len(relevant_cards["sites"]) < 5:
+                    relevant_cards["sites"].append(card)
+        
+        # Definir variáveis para o contexto
+        factions_for_context = factions_mentioned
+        archetype_for_context = detected_archetype.upper()
+    
+    # FORMATAR CONTEXTO (comum para ambos os modos)
+    context = f"CARTAS DISPONÍVEIS PARA {', '.join(factions_for_context)} {archetype_for_context}:\n\n"
+    
+    # Se temos cartas obrigatórias, destacá-las
+    if required_cards_found:
+        context += "⭐ CARTAS OBRIGATÓRIAS (devem ser incluídas no deck):\n"
+        for card in required_cards_found:
+            influence = format_influence(card)
+            if card.card_type == "Unit":
+                context += f"• {card.name} | {influence} | {card.attack}/{card.health} | {card.rarity}\n"
             else:
-                if len(relevant_cards["units_high"]) < 15:
-                    relevant_cards["units_high"].append(card)
-        elif card.card_type == "Spell":
-            if len(relevant_cards["spells"]) < 20:
-                relevant_cards["spells"].append(card)
-        elif card.card_type == "Weapon":
-            if len(relevant_cards["weapons"]) < 15:
-                relevant_cards["weapons"].append(card)
-        elif card.card_type == "Power":
-            if len(relevant_cards["powers"]) < 30:
-                relevant_cards["powers"].append(card)
-        elif card.card_type == "Relic":
-            if len(relevant_cards["relics"]) < 10:
-                relevant_cards["relics"].append(card)
-        elif card.card_type == "Site":
-            if len(relevant_cards["sites"]) < 5:
-                relevant_cards["sites"].append(card)
+                context += f"• {card.name} | {influence} | {card.card_type} | {card.rarity}\n"
+        context += "\n"
     
-    # Formatar texto com dados COMPLETOS
-    context = f"CARTAS DISPONÍVEIS PARA {', '.join(factions_mentioned)} {detected_archetype.upper()}:\n\n"
     context += "IMPORTANTE: Use EXATAMENTE as informações fornecidas abaixo. NÃO invente raridades ou influências.\n\n"
     
     # Adicionar estatísticas rápidas
     total_cards = sum(len(cards) for cards in relevant_cards.values())
     context += f"(Total: {total_cards} cartas selecionadas de {len(cards)} disponíveis)\n\n"
     
+    # Se usar mercado, destacar cartas de acesso
+    if filters['use_market']:
+        market_access_cards = []
+        for category in relevant_cards.values():
+            for card in category:
+                if any(term in card.text.lower() for term in ['your market', 'smuggler', 'merchant', 'bargain']):
+                    market_access_cards.append(card)
+        
+        if market_access_cards:
+            context += "=== CARTAS DE ACESSO AO MERCADO ===\n"
+            for card in market_access_cards[:8]:
+                influence = format_influence(card)
+                context += f"• {card.name} | {influence} | "
+                if card.card_type == "Unit":
+                    context += f"{card.attack}/{card.health} | "
+                context += f"{card.rarity} | Acessa mercado\n"
+            context += "\n"
+        else:
+            context += "⚠️ ATENÇÃO: Mercado solicitado mas nenhuma carta de acesso encontrada!\n\n"
+    
+    # Continuar com o formato normal
     if relevant_cards["units_low"]:
         context += "=== EARLY GAME (1-2 custo) ===\n"
         for c in relevant_cards["units_low"]:
             influence = format_influence(c)
             context += f"• {c.name} | {influence} | {c.attack}/{c.health} | {c.rarity}"
             if c.text:
-                # Destacar keywords importantes
                 important_keywords = ['Charge', 'Warcry', 'Flying', 'Quickdraw', 'Aegis', 'Deadly', 'Overwhelm']
                 keywords_found = [kw for kw in important_keywords if kw in c.text]
                 if keywords_found:
@@ -258,7 +472,6 @@ def prepare_cards_context(cards, strategy):
     
     if relevant_cards["spells"]:
         context += "\n=== SPELLS ===\n"
-        # Agrupar por tipo de efeito
         removal_spells = [c for c in relevant_cards["spells"] if any(word in c.text.lower() for word in ['kill', 'destroy', 'damage', 'deal'])]
         draw_spells = [c for c in relevant_cards["spells"] if 'draw' in c.text.lower()]
         other_spells = [c for c in relevant_cards["spells"] if c not in removal_spells and c not in draw_spells]
@@ -285,13 +498,11 @@ def prepare_cards_context(cards, strategy):
         context += "\n=== WEAPONS ===\n"
         for c in relevant_cards["weapons"][:10]:
             influence = format_influence(c)
-            # Weapons geralmente dão bônus de ataque/vida
             stats = f"+{c.attack}/+{c.health}" if c.attack is not None and c.health is not None else "N/A"
             context += f"• {c.name} | {influence} | {stats} | {c.rarity}\n"
     
     if relevant_cards["powers"]:
         context += "\n=== POWER CARDS ===\n"
-        # Separar por tipo
         sigils = [c for c in relevant_cards["powers"] if "Sigil" in c.name]
         dual_powers = [c for c in relevant_cards["powers"] if len(c.factions) > 1]
         utility_powers = [c for c in relevant_cards["powers"] if c not in sigils and c not in dual_powers]
@@ -322,7 +533,34 @@ def generate_deck(strategy, cards, model_key="gpt-4o", detailed=False):
     """Gera um deck usando o AI"""
     
     # Preparar contexto
-    cards_context = prepare_cards_context(cards, strategy)
+    # Coletar valores dos filtros
+    filters = {
+        'allowed_factions': [],
+        'max_factions': st.session_state.get('max_factions', 2),
+        'use_market': st.session_state.get('use_market', True),
+        'required_cards': [card.strip() for card in st.session_state.get('required_cards', '').split('\n') if card.strip()],
+        'banned_cards': [card.strip() for card in st.session_state.get('banned_cards', '').split('\n') if card.strip()],
+        'filter_mode': st.session_state.get('filter_mode', 'Filtrar cartas relevantes')
+    }
+    
+    # Coletar facções permitidas
+    if st.session_state.get('filter_fire', True):
+        filters['allowed_factions'].append('FIRE')
+    if st.session_state.get('filter_time', True):
+        filters['allowed_factions'].append('TIME')
+    if st.session_state.get('filter_justice', True):
+        filters['allowed_factions'].append('JUSTICE')
+    if st.session_state.get('filter_primal', True):
+        filters['allowed_factions'].append('PRIMAL')
+    if st.session_state.get('filter_shadow', True):
+        filters['allowed_factions'].append('SHADOW')
+    
+    # Se nenhuma facção selecionada, permitir todas
+    if not filters['allowed_factions']:
+        filters['allowed_factions'] = ['FIRE', 'TIME', 'JUSTICE', 'PRIMAL', 'SHADOW']
+    
+    # Preparar contexto
+    cards_context = prepare_cards_context(cards, strategy, filters)
     
     # Prompt CAMPEÃO para todos os modelos
     prompt = f"""Você é um CAMPEÃO MUNDIAL de TCGs, especialista supremo em Eternal Card Game, com anos de experiência competitiva em torneios de alto nível. Sua missão é construir decks CAMPEÕES que dominam o meta competitivo.
@@ -335,11 +573,14 @@ REQUISITOS OBRIGATÓRIOS (NUNCA VIOLE ESTAS REGRAS):
 3. Proporção de Não-Power: MÍNIMO 2/3 do deck (50+ em deck de 75)
 4. Limite de Cópias: MÁXIMO 4 por carta (EXCETO Sigils básicos = ilimitados)
 5. Validação: TODAS as cartas devem ter DeckBuildable=TRUE
-6. Mercado: OPCIONAL - até 5 cartas únicas (requer cartas no deck principal que acessem, troquem, comprem ou copiem cartas do mercado)
+6. Mercado: OPCIONAL - até 5 cartas únicas (requer cartas no deck principal que acessem, troquem, comprem ou copiem cartas do mercado), as cartas do mercado devem ser únicas e não podem ser repetidas no deck principal. Apenas 1 cópia de cada carta pode ser incluída no mercado. As 5 cartas do mercado devem ser escolhidas com base na sinergia com o deck principal e na estratégia geral. Elas são cartas extras que podem ser compradas durante o jogo, mas não fazem parte do deck principal, ou seja, são cartas adicionais ao deck principal, mas não contam para o total de 75 cartas. Exemplo, se o deck principal tiver 75 cartas, o mercado terá 5 cartas adicionais, totalizando 80 cartas jogáveis e no deck principal devemos ter ao menos 4 cartas que interajam com o mercado, como "your market", "Bargain", "Market Access", "Market Interaction" ou similares, para poder utilizar essas cartas que estão no mercado.
+7. Ainda sobre o Mercado - Cartas NO MERCADO, não devem ser cartas que tenham "your market", "Bargain", "Market Access", "Market Interaction" ou similares, pois essas cartas só acessam o mercado a partir do deck principal, portanto, não devem ser incluídas no mercado, pois devem fazer parte do deck principal, sem essas cartas no deck principal não conseguimos comprar ou utilizar cartas do mercado e se elas estão dentro no mercado não faz sentido algum. O mercado é uma extensão do deck principal, mas as cartas que interagem com o mercado devem estar no deck principal. Podem ser incluidas quaisquer cartas válidas no mercado, desde que sejam únicas e que não estejam repetidas no deck principal.
+8. Cartas Obrigatórias: Se solicitado, inclua cartas específicas (ex.: "4x Fire Sigil") e garanta que elas estejam no deck final.
 
 VALIDAÇÃO MATEMÁTICA OBRIGATÓRIA:
 - Some TODAS as quantidades: (X units + Y spells + Z weapons + W relics + P powers = 75)
 - Verifique: Total ≥ 75, Powers ≥ 25, Não-Powers ≥ 50
+- Se houver mercado, verifique se Mercado <= 5 e se o deck principal tem ao menos 4 cartas que interajam com o mercado.
 - Conte cada linha individualmente antes de finalizar
 
 {cards_context}
@@ -440,7 +681,74 @@ with st.sidebar:
     st.caption(f"💰 ~${model_info['cost_per_1k']:.4f}/1k tokens")
     
     detailed_mode = st.checkbox("Modo Detalhado", help="Incluir explicações detalhadas")
+
+    # NOVO: Sistema de Filtros Avançados
+    st.markdown("---")
+    with st.expander("🎛️ Filtros Avançados", expanded=False):
+        
+        # 1. Facções Permitidas
+        st.markdown("#### Facções Permitidas")
+        col1, col2 = st.columns(2)
+        with col1:
+            fire_allowed = st.checkbox("🔥 Fire", value=True, key="filter_fire")
+            time_allowed = st.checkbox("⏰ Time", value=True, key="filter_time")
+            justice_allowed = st.checkbox("⚖️ Justice", value=True, key="filter_justice")
+        with col2:
+            primal_allowed = st.checkbox("🌊 Primal", value=True, key="filter_primal")
+            shadow_allowed = st.checkbox("💀 Shadow", value=True, key="filter_shadow")
+        
+        st.markdown("---")
+        
+        # 2. Número Máximo de Facções
+        max_factions = st.selectbox(
+            "**Número Máximo de Facções**",
+            options=[1, 2, 3, 4, 5],
+            index=1,  # Default: 2
+            help="Limita cartas a no máximo X facções",
+            key="max_factions"  # ADICIONAR
+        )        
+        
+        # 3. Usar Mercado
+        use_market = st.checkbox(
+            "**Incluir Cartas de Mercado**",
+            value=True,
+            help="Desmarque para excluir cartas com 'your market' ou 'Bargain'",
+            key="use_market"  # ADICIONAR
+        )
+        
+        st.markdown("---")
+        
+        # 4. Cartas Obrigatórias
+        st.markdown("#### Cartas Específicas")
+        required_cards = st.text_area(
+            "Cartas Obrigatórias (uma por linha):",
+            height=100,  # Altura mínima corrigida
+            help="Estas cartas sempre serão incluídas no contexto",
+            placeholder="Ex:\nTorch\nHarsh Rule",
+            key="required_cards"
+        )
+        
+        # 5. Cartas Proibidas
+        banned_cards = st.text_area(
+            "Cartas Proibidas (uma por linha):",
+            height=100,  # Altura mínima corrigida
+            help="Estas cartas nunca serão incluídas",
+            placeholder="Ex:\nSeek Power\nBore",
+            key="banned_cards"
+        )
+        
+        st.markdown("---")
+        
+        # 6. Modo de Filtragem
+        filter_mode = st.radio(
+            "**Modo de Filtragem**",
+            ["Filtrar cartas relevantes", "Incluir todas as cartas"],
+            index=0,
+            help="Filtrar = IA focada | Todas = IA vê tudo",
+            key="filter_mode"  # ADICIONAR
+        )
     
+    # 7. Exibir Exemplos de Estratégias   
     st.markdown("---")
     st.caption("💡 Exemplos de estratégias:")
     st.caption("• Deck aggro Fire com burn")
@@ -615,4 +923,4 @@ else:
 
 # Footer
 st.markdown("---")
-st.caption("💡 Dica: Para melhores resultados, teste com o1-pro ou gpt-4o-preview para análises mais precisas")
+st.caption("💡 Dica: Para melhores resultados, teste com o1 ou gpt-4.5-preview para análises mais precisas")
