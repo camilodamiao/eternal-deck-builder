@@ -90,6 +90,30 @@ def load_all_cards():
     client = GoogleSheetsClient()
     return client.get_all_cards()
 
+def is_market_access_card(card):
+    """Identifica se uma carta pode acessar o mercado"""
+    if not card.text:
+        return False
+    
+    text_lower = card.text.lower()
+    
+    # Termos que indicam acesso ao mercado
+    market_access_terms = [
+        'your market',
+        'bargain',
+    ]
+    
+    # Verificar se tem algum termo de acesso
+    has_access = any(term in text_lower for term in market_access_terms)
+    
+    # Verificar se é um merchant pelo nome
+    is_merchant = 'merchant' in card.name.lower()
+    
+    # Verificar smugglers (também acessam mercado)
+    is_smuggler = 'smuggler' in card.name.lower()
+    
+    return has_access or is_merchant or is_smuggler
+
 # Função para preparar contexto de cartas ATUALIZADA
 def prepare_cards_context(cards, strategy, filters=None):
     """Prepara uma seleção relevante de cartas para o AI com dados completos"""
@@ -112,6 +136,32 @@ def prepare_cards_context(cards, strategy, filters=None):
     # Debug do total de cartas
     st.info(f"📊 Total de cartas na base: {len(cards)}")
     
+    # NOVO: Coletar cartas de mercado se use_market está ativo
+    market_access_cards = []
+    if filters['use_market']:
+        st.info("🏪 Mercado habilitado - buscando cartas de acesso...")
+        
+        for card in cards:
+            # Verificar se é carta banida
+            if card.name in filters['banned_cards']:
+                continue
+                
+            # Verificar se é carta de acesso ao mercado
+            if is_market_access_card(card):
+                # Verificar se tem facções permitidas
+                if card.factions and any(f in filters['allowed_factions'] for f in card.factions):
+                    market_access_cards.append(card)
+                elif not card.factions:  # Cartas neutras
+                    market_access_cards.append(card)
+        
+        st.success(f"✅ Encontradas {len(market_access_cards)} cartas de acesso ao mercado")
+        
+        # Debug - mostrar algumas cartas encontradas
+        if market_access_cards:
+            st.write("Exemplos de cartas de mercado encontradas:")
+            for card in market_access_cards[:5]:
+                st.write(f"  - {card.name} ({'/'.join(card.factions) if card.factions else 'Neutral'})")
+
     # PRIMEIRO: Processar cartas obrigatórias/banidas (SEMPRE)
     cards_to_process = []
     required_cards_found = []
@@ -152,6 +202,11 @@ def prepare_cards_context(cards, strategy, filters=None):
     # Função auxiliar para formatar influência
     def format_influence(card):
         """Formata influência no estilo {F}{T}{J}"""
+        # Usar influence_string se disponível
+        if hasattr(card, 'influence_string') and card.influence_string:
+            return f"{card.cost}{card.influence_string}"
+        
+        # Fallback para o método antigo
         if not card.influence:
             return str(card.cost)
         
@@ -372,6 +427,27 @@ def prepare_cards_context(cards, strategy, filters=None):
             if not any(c[0].name == req_card.name for c in filtered_cards):
                 filtered_cards.insert(0, (req_card, 100))
                 st.warning(f"⚠️ Adicionando '{req_card.name}' que foi perdida nos filtros")
+
+        # NOVO: Forçar inclusão das cartas de mercado PRIMEIRO
+        if market_access_cards:
+            st.info(f"🏪 Adicionando {len(market_access_cards)} cartas de mercado ao contexto...")
+            
+            for card in market_access_cards:
+                # Adicionar à categoria apropriada
+                if card.card_type == "Unit":
+                    if card.cost <= 2:
+                        relevant_cards["units_low"].append(card)
+                    elif card.cost <= 4:
+                        relevant_cards["units_mid"].append(card)
+                    else:
+                        relevant_cards["units_high"].append(card)
+                elif card.card_type == "Spell":
+                    relevant_cards["spells"].append(card)
+                elif card.card_type == "Relic":
+                    relevant_cards["relics"].append(card)
+                
+                # Remover da lista filtered_cards para evitar duplicação
+                filtered_cards = [(c, s) for c, s in filtered_cards if c.name != card.name]
         
         # Distribuir cartas nas categorias
         for card, score in filtered_cards:

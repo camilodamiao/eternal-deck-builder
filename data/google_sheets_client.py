@@ -69,7 +69,6 @@ class GoogleSheetsClient:
     def parse_card(self, row_data: Dict[str, Any]) -> Optional[Card]:
         """Converter linha do Sheets em Card"""
         try:
-            # Mapear colunas para nosso modelo
             name = row_data.get('Name', '')
             if not name:
                 return None
@@ -87,21 +86,22 @@ class GoogleSheetsClient:
             # Parsear tipo
             card_type = row_data.get('Type', 'Unit')
             
-            # Parsear influência (formato {F} ou {FF} etc)
+            # Pegar string de influência ORIGINAL
+            influence_string = row_data.get('Influence', '')
+            
+            # MANTER o dicionário para compatibilidade
             influence = {}
-            influence_str = row_data.get('Influence', '')
-            if influence_str:
-                # Contar ocorrências de cada letra
-                if 'F' in influence_str:
-                    influence['FIRE'] = influence_str.count('F')
-                if 'T' in influence_str:
-                    influence['TIME'] = influence_str.count('T')
-                if 'J' in influence_str:
-                    influence['JUSTICE'] = influence_str.count('J')
-                if 'P' in influence_str:
-                    influence['PRIMAL'] = influence_str.count('P')
-                if 'S' in influence_str:
-                    influence['SHADOW'] = influence_str.count('S')
+            if influence_string:
+                if 'F' in influence_string:
+                    influence['FIRE'] = influence_string.count('F')
+                if 'T' in influence_string:
+                    influence['TIME'] = influence_string.count('T')
+                if 'J' in influence_string:
+                    influence['JUSTICE'] = influence_string.count('J')
+                if 'P' in influence_string:
+                    influence['PRIMAL'] = influence_string.count('P')
+                if 'S' in influence_string:
+                    influence['SHADOW'] = influence_string.count('S')
             
             # Determinar facções baseado na influência
             factions = list(influence.keys())
@@ -111,11 +111,11 @@ class GoogleSheetsClient:
             if not rarity:
                 rarity = 'Common'
             
-            # Criar carta
+            # Criar carta - ADICIONAR influence_string como parâmetro extra
             card = Card(
                 name=name,
                 cost=cost,
-                influence=influence,
+                influence=influence,  # MANTER para compatibilidade
                 card_type=card_type,
                 factions=factions,
                 text=row_data.get('CardText', ''),
@@ -123,6 +123,9 @@ class GoogleSheetsClient:
                 deck_buildable=deck_buildable,
                 image_url=row_data.get('ImageUrl', '')
             )
+            
+            # ADICIONAR o influence_string como atributo extra após criação
+            card.influence_string = influence_string
             
             # Adicionar attack/health se for unidade
             if card.is_unit:
@@ -136,7 +139,6 @@ class GoogleSheetsClient:
             # Adicionar set_number e eternal_id
             if 'SetNumber' in row_data:
                 card.set_number = row_data.get('SetNumber', '1')
-
             if 'EternalID' in row_data:
                 card.eternal_id = row_data.get('EternalID', '1')
             

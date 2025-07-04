@@ -7,6 +7,7 @@ class Card(BaseModel):
     name: str
     cost: int = 0
     influence: Dict[str, int] = Field(default_factory=dict)  # Ex: {"FIRE": 1, "TIME": 2}
+    influence_string: Optional[str] = None  # NOVO CAMPO - Ex: "{F}{T}{T}"
     card_type: str  # Unit, Spell, Power, etc.
     factions: List[str] = Field(default_factory=list)  # Ex: ["FIRE", "TIME"]
     attack: Optional[int] = None
